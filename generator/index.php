@@ -101,8 +101,8 @@ if (empty($projectData['services']['webdriver'])) {
 $projectData['_dashboardEndpoint'] = '';
 if (!empty($projectData['services']['dashboard'])) {
     $projectData['services']['dashboard']['endpoints'] = $projectData['services']['dashboard']['endpoints'] ?? [
-        'localhost' => []
-    ];
+            'localhost' => []
+        ];
     reset($projectData['services']['dashboard']['endpoints']);
     $projectData['_dashboardEndpoint'] = sprintf(
         '%s://%s',
@@ -126,13 +126,29 @@ $projectData['_endpointDebugMap'] = [];
 
 verbose('Generating ENV files... [DONE]');
 
+const YVES_APP = 'yves';
+const ZED_APP = 'zed';
+const GLUE_APP = 'glue';
+const BACKOFFICE_APP = 'backoffice';
+const BACKEND_GATEWAY_APP = 'backend-gateway';
+const MERCHANT_PORTAL = 'merchant-portal';
+
+const ENTRY_POINTS = [
+    BACKOFFICE_APP => 'Backoffice',
+    BACKEND_GATEWAY_APP => 'BackendGateway',
+    ZED_APP => 'Zed',
+    YVES_APP => 'Yves',
+    GLUE_APP => 'Glue',
+    MERCHANT_PORTAL => 'MerchantPortal',
+];
+
 foreach ($projectData['groups'] ?? [] as $groupName => $groupData) {
     foreach ($groupData['applications'] ?? [] as $applicationName => $applicationData) {
         foreach ($applicationData['endpoints'] ?? [] as $endpoint => $endpointData) {
             if ($endpointData === null) {
                 $endpointData = [];
             }
-            $entryPoint = $endpointData['entry-point'] ?? ucfirst(strtolower($applicationData['application']));
+            $entryPoint = $endpointData['entry-point'] ?? ENTRY_POINTS[$applicationData['application']] ?? str_replace('-', '', ucwords(strtolower($applicationName), '-'));
             $projectData['_entryPoints'][$entryPoint] = $entryPoint;
             $projectData['groups'][$groupName]['applications'][$applicationName]['endpoints'][$endpoint]['entry-point'] = $entryPoint;
 
@@ -172,8 +188,8 @@ foreach ($projectData['groups'] ?? [] as $groupName => $groupData) {
                     $projectData['groups'][$groupName]['applications'][$applicationName]['endpoints'][$endpoint]['redirect']
                         = $redirect
                         = [
-                            'url' => $redirect,
-                        ];
+                        'url' => $redirect,
+                    ];
                 }
 
                 $projectData['groups'][$groupName]['applications'][$applicationName]['endpoints'][$endpoint]['redirect']['url']
@@ -189,12 +205,44 @@ foreach ($primal as $callbacks) {
     }
 }
 
-$endpointMap = $projectData['_endpointMap'];
+$endpointMap = $projectData['_endpointMap'] = mapBackendEndpointsWithFallbackZed($projectData['_endpointMap']);
+
+$projectData['_testing'] = [
+    'defaultPort' => $defaultPort,
+    'projectServices' => $projectData['services'],
+    'endpointMap' => $endpointMap,
+];
+
 $projectData['_applications'] = [];
 $frontend = [];
 $environment = [
     'project' => $projectData['namespace'],
 ];
+
+/**
+ * @param array $endpointMap
+ *
+ * @return array
+ */
+function mapBackendEndpointsWithFallbackZed(array $endpointMap): array
+{
+    $zedApplicationsToCheck = [
+        BACKOFFICE_APP,
+        BACKEND_GATEWAY_APP,
+    ];
+
+    foreach ($zedApplicationsToCheck as $zedApplicationToCheck) {
+        foreach ($endpointMap as $store => $storeEndpointMap) {
+            if (array_key_exists($zedApplicationToCheck, $storeEndpointMap)) {
+                continue;
+            }
+            $endpointMap[$store][$zedApplicationToCheck] = $storeEndpointMap[ZED_APP];
+        }
+    }
+
+    return $endpointMap;
+}
+
 foreach ($projectData['groups'] ?? [] as $groupName => $groupData) {
     foreach ($groupData['applications'] ?? [] as $applicationName => $applicationData) {
         if ($applicationData['application'] !== 'static') {
@@ -257,12 +305,25 @@ foreach ($projectData['groups'] ?? [] as $groupName => $groupData) {
                 );
             }
 
-            if ($applicationData['application'] === 'zed') {
-
+            $services = [];
+            $isEndpointDataHasStore = array_key_exists('store', $endpointData);
+            if ($isEndpointDataHasStore) {
                 $services = array_replace_recursive(
                     $projectData['regions'][$groupData['region']]['stores'][$endpointData['store']]['services'],
                     $endpointData['services'] ?? []
                 );
+            }
+            if ($isEndpointDataHasStore && $endpointData['store'] === ($projectData['docker']['testing']['store'] ?? '')) {
+                $projectData['_testing']['storeName'] = $endpointData['store'];
+                $projectData['_testing']['regionServices'] = array_merge($projectData['_testing']['services'] ?? [], $services);
+                $projectData['_testing']['services'][$endpointData['store']][$applicationData['application']] = $services;
+            }
+
+            if ($applicationData['application'] === ZED_APP
+                || $applicationData['application'] === BACKEND_GATEWAY_APP
+                || $applicationData['application'] === BACKOFFICE_APP
+                || $applicationData['application'] === MERCHANT_PORTAL
+            ) {
 
                 $envVarEncoder->setIsActive(true);
                 file_put_contents(
@@ -296,37 +357,27 @@ foreach ($projectData['groups'] ?? [] as $groupName => $groupData) {
                 );
                 $envVarEncoder->setIsActive(false);
             }
-
-            if ($applicationData['application'] === 'yves') {
-
-                $services = array_replace_recursive(
-                    $projectData['regions'][$groupData['region']]['stores'][$endpointData['store']]['services'],
-                    $endpointData['services'] ?? []
-                );
-
-                if ($endpointData['store'] === ($projectData['docker']['testing']['store'] ?? '')) {
-                    $envVarEncoder->setIsActive(true);
-                    file_put_contents(
-                        $deploymentDir . DS . 'env' . DS . 'cli' . DS . 'testing.env',
-                        $twig->render('env/cli/testing.env.twig', [
-                            'applicationName' => $applicationName,
-                            'applicationData' => $applicationData,
-                            'project' => $projectData,
-                            'host' => strtok($endpoint, ':'),
-                            'port' => strtok($endpoint) ?: $defaultPort,
-                            'regionName' => $groupData['region'],
-                            'regionData' => $projectData['regions'][$groupData['region']],
-                            'brokerConnections' => getBrokerConnections($projectData),
-                            'storeName' => $endpointData['store'],
-                            'services' => $services,
-                            'endpointMap' => $endpointMap,
-                        ])
-                    );
-                    $envVarEncoder->setIsActive(false);
-                }
-            }
         }
     }
+}
+
+if (!empty($projectData['services']['key_value_store']['replicas'])) {
+    $replicas = $projectData['services']['key_value_store']['replicas']['number'] ?? 1;
+    $projectData['services']['key_value_store']['replica-services'] = array_map(function ($index) {
+        return 'replica' . $index;
+    }, range(1, (int)$replicas));
+    $projectData['services']['key_value_store']['options'] = json_encode([
+        'replication' => 'predis',
+    ], JSON_UNESCAPED_SLASHES);
+
+    $sources = [
+        'tcp://key_value_store?role=master', 'tcp://key_value_store'
+    ];
+    foreach ($projectData['services']['key_value_store']['replica-services'] as $replica) {
+        $sources[] = 'tcp://key_value_store_' . $replica;
+    }
+
+    $projectData['services']['key_value_store']['sources'] = json_encode($sources, JSON_UNESCAPED_SLASHES);
 }
 
 foreach ($projectData['services'] ?? [] as $serviceName => $serviceData) {
@@ -376,6 +427,11 @@ file_put_contents(
     $twig->render('php/conf.d/99-from-deploy-yaml-php.ini.twig', $projectData)
 );
 
+file_put_contents(
+    $deploymentDir . DS . 'context' . DS . 'php' . DS . 'debug' . DS . 'etc' . DS . 'php' . DS . 'debug.conf.d' . DS . '99-from-deploy-yaml-php.ini',
+    $twig->render('php/conf.d/99-from-deploy-yaml-php.ini.twig', $projectData)
+);
+
 $envVarEncoder->setIsActive(true);
 file_put_contents(
     $deploymentDir . DS . 'terraform/environment.tf',
@@ -409,6 +465,12 @@ unlink($deploymentDir . DS . 'images' . DS . 'common' . DS . 'application' . DS 
 file_put_contents(
     $deploymentDir . DS . 'docker-compose.yml',
     $twig->render('docker-compose.yml.twig', $projectData)
+);
+
+$envVarEncoder->setIsActive(true);
+file_put_contents(
+    $deploymentDir . DS . 'env' . DS . 'cli' . DS . 'testing.env',
+    $twig->render('env/cli/testing.env.twig', $projectData['_testing'])
 );
 
 verbose('Generating scripts... [DONE]');
@@ -795,10 +857,33 @@ function buildNewrelicEnvVariables(array $projectData): array
     }
 
     foreach ($projectData['docker']['newrelic'] as $key => $value) {
+        if ($key == 'distributed-tracing') {
+            $newrelicEnvVariables = array_merge($newrelicEnvVariables, buildNewrelicDistributedTracing($projectData));
+
+            continue;
+        }
+
         $newrelicEnvVariables['NEWRELIC_' . strtoupper($key)] = $value;
     }
+     return $newrelicEnvVariables;
+}
 
-    return $newrelicEnvVariables;
+/**
+ * @param array $projectData
+ *
+ * @return string[]
+ */
+function buildNewrelicDistributedTracing(array $projectData): array
+{
+    $distributedTracingData = $projectData['docker']['newrelic']['distributed-tracing'] ?? [];
+
+    return [
+        'NEWRELIC_TRANSACTION_TRACER_ENABLED' => (int) $distributedTracingData['enabled'] ?? 0,
+        'NEWRELIC_DISTRIBUTED_TRACING_ENABLED' => (int) $distributedTracingData['enabled'] ?? 0,
+        'NEWRELIC_SPAN_EVENTS_ENABLED' => (int) $distributedTracingData['enabled'] ?? 0,
+        'NEWRELIC_TRANSACTION_TRACER_THRESHOLD' => (int) $distributedTracingData['transaction-tracer-threshold'] ?? 0,
+        'NEWRELIC_DISTRIBUTED_TRACING_EXCLUDE_NEWRELIC_HEADER' => (int) $distributedTracingData['exclude-newrelic-header'] ?? 0,
+    ];
 }
 
 /**

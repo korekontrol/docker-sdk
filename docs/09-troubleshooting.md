@@ -1,12 +1,4 @@
-
-> Audience:
->
-> - Everyone who has an issue running the Docker SDK locally.
->
-> Outcome:
-> - You can find a solution for your issue with the Docker SDK.
-
-
+# Troubleshooting
 
 This document contains solutions to the most common issues related to the Docker SDK.
 
@@ -186,7 +178,7 @@ docker/sdk up
 ### An application is not reachable via http
 
 **when**
-An application like Yves, Zed, or Glue is not reachable after installation.
+An application like Yves, BackOffice(Zed), Glue, or MerchantPortal is not reachable after installation.
 
 **then**
 In `deploy.*.yml`, ensure that SSL encryption is disabled:
@@ -284,3 +276,18 @@ Try the following:
     ```bash
     docker/sdk run -x
     ```
+
+**when**
+It's not possible to establish the database connection from the host machine.
+
+**then**
+1. Check that the deploy yml file is used and make sure the port is exposed.
+2. Check that port is not occupied by the local process by running `sudo lsof -nP -i4TCP:3306 | grep LISTEN` (with port declared in the deploy.yml file).
+3. Check if the proper credentials and database name are used. You can find all the required information in the deploy yml file.
+
+
+**when**
+You get an error after running `docker/sdk cli {ARGUMENT_1}`.
+
+**then**
+Wrap the command arguments into single quotes. For example, `docker/sdk cli 'composer require spryker/*'`

@@ -1,12 +1,4 @@
-> Audience:
->
-> - Devops engineers who use the Docker SDK for CI and CD.
-> - Developers who use the Docker SDK for development.
->
-> Outcome:
-> - You know how to configure configure the parameters in the Deploy file.
-
-
+# Deploy file reference — version 1
 This reference page describes version 1 of the Deploy file format. This is the newest version.
 <div class="bg-section">
 <h2> Glossary</h2>
@@ -24,7 +16,7 @@ This reference page describes version 1 of the Deploy file format. This is the n
  <dd>A store related context a request is processed in.</dd>
 
  <dt>Application</dt>
- <dd>A Spryker application, like Zed, Yves or Glue.</dd>
+ <dd>A Spryker application, like Backoffice(Zed), Backend-Gateway, Yves, Glue or MerchantPortal.</dd>
 
  <dt>Service</dt>
  <dd>An external storage or utility service. Represents service type and configuration. The configuration can be defined on different levels: project-wide, region-wide, store-specific or endpoint-specific with limitations based on the service type.</dd>
@@ -83,6 +75,14 @@ namespace: spryker-demo
 
 ***
 
+### pipeline:
+
+Defines the installation recipe for the Spryker applications to the specific configuration file from the `config/install/` directory. 
+
+This variable is optional. If not specified, the default value applies: `pipeline: 'docker'`. Installation recipe configuration file: `config/install/docker.yml`.
+
+***
+
 ### tag:
 
 Defines a tag to separate different boots for a single deployment.
@@ -134,16 +134,7 @@ Defines the Docker image configuraion to run Spryker applications in.
 ***
 ### image:tag
 
-Defines the image tag according to the `spryker/php` images located at [Docker Hub](https://hub.docker.com/r/spryker/php/tags). Possible values are:
-1. `spryker/php:7.3` - applies the default image (currently, it is Debian).
-
-2. `spryker/php:7.3-debian` - applies Debian as a base image.
-
-3. `spryker/php:7.3-alpine` - applies Alpine as a base image. The Alpine images are smaller, but you may have issues with:
-    * iconv
-    * NFS
-    * Non-lating languages
-    * Tideways
+Defines the image tag according to the `spryker/php` images located at [Docker Hub](https://hub.docker.com/r/spryker/php/tags).
 
 
 This variable is optional. If not specified, the default value applies: `image: spryker/php:7.3`.
@@ -252,14 +243,25 @@ groups:
   BACKEND-1:
     region: REGION-1
     applications:
-      zed_1:
-        application: zed
+      backoffice_1:
+        application: backoffice
         endpoints:
-          zed.store1.spryker.local:
+          backoffice.store1.spryker.local:
             store: STORE-1
             services:
               # Application-Store-specific services settings
-          zed.store2.spryker.local:
+          backoffice.store2.spryker.local:
+            store: STORE-2
+            services:
+              # Application-Store-specific services settings
+      merchant_portal_1:
+        application: merchant-portal
+        endpoints:
+          mp.store1.spryker.local:
+            store: STORE-1
+            services:
+              # Application-Store-specific services settings
+          mp.store2.spryker.local:
             store: STORE-2
             services:
               # Application-Store-specific services settings
@@ -273,7 +275,7 @@ groups:
             store: STORE-1
             services:
               # Application-Store-specific services settings
-          yves.astore2t.spryker.local:
+          yves.store2.spryker.local:
             store: STORE-2
             services:
               # Application-Store-specific services settings
@@ -295,15 +297,15 @@ groups:
   BACKEND-1:
     region: REGION-1
     applications:
-      zed_store_1:
-        application: zed
+      backoffice_store_1:
+        application: backoffice
         endpoints:
-          zed.store1.spryker.local:
+          backoffice.store1.spryker.local:
             store: STORE-1
-      zed_store_2:
-        application: zed
+      backoffice_store_2:
+        application: backoffice
         endpoints:
-          zed.store2.spryker.local:
+          backoffice.store2.spryker.local:
             store: STORE-2
 
  ```
@@ -318,7 +320,7 @@ The key must be project-wide unique.
 
 Obligatory parameters for `application:`:
 
-* `groups: applications: application:` - defines the type of *Application*. Possible values are `zed`, `yves`, and `glue`.
+* `groups: applications: application:` - defines the type of *Application*. Possible values are `backoffice`, `backend-gateway`, `zed`, `yves`, `glue` and `merchant-portal`.
 * `groups: applications: endpoints:` - defines the list of *Endpoints* to access the *Application*. See [groups: applications: endpoints:](#groups-applications-endpoints-) to learn more.
 
 Optional parameters for `application:`:
@@ -330,32 +332,45 @@ Optional parameters for `application:`:
 
 * `groups: applications: application: endpoints: real-ip: from:` - defines gateway IP addresses to fetch the real IP address.
 * `groups: applications: application: endpoints: auth:` - defines the basic auth.
-* `groups: applications: application: endpoints: auth: engine:` - defines an engine for the basic auth. Allowed values are `basic` and `whitelist`.
+* `groups: applications: application: endpoints: auth: engine:` - defines an engine for the basic auth. Only one of the following is allowed per an endpoint: `basic` or `whitelist`.
   * Basic auth variables:
     * `groups: applications: application: endpoints: auth: users:` - defines user credentials for basic auth.
     	* `groups: applications: application: endpoints: auth: users: username:` - defines a username for basic auth.
-	* `groups: applications: application: endpoints: auth: users: password:` - defines a password for basic auth.
-    * `groups: applications: application: endpoints: auth: exclude:` - defines the IPs to allow access from.
+	    * `groups: applications: application: endpoints: auth: users: password:` - defines a password for basic auth.
+    * `groups: applications: application: endpoints: auth: exclude:` - defines the IPs from which clients can access the endpoint bypassing the basic auth.
   * Whitelist auth variables:
     * `groups: applications: application: endpoints: auth: include:` - defines the IPs to allow access from.
 
 * `groups: applications: application: endpoints: primal:` - defines if a ZED endpoint is primal for a store. Yves and Glue applications send Zed RPC calls to the primal endpoint. This variable is optional with the default value of `false`. If no endpoint is defined as primal for a store, the first endpoint in descending order is considered primal.
 * `groups: applications: application: http: max-request-body-size:` - defines the maximum allowed size of the request body that can be sent to the application, in MB. If not specified, the default values apply:
-	* `zed` - `10m`
+	* `backoffice` - `10m`
+    * `merchant-portal` - `10m`
 	* `glue` - `2m`
 	* `yves` - `1m`
 
 ```yaml
 ...
     applications:
-      zed:
-        application: zed
+      backoffice:
+        application: backoffice
         http:
           max-request-body-size: 20m
         endpoints:
-          zed.store1.spryker.local:
+          backoffice.store1.spryker.local:
             store: STORE-1
  ```
+
+* `groups: applications: application: limits: workers` - defines the maximum number of concurrent child processes a process manager can serve simultaneously.
+
+```yaml
+...
+    applications:
+      backoffice:
+        application: backoffice
+        limits:
+            workers: 4
+        ...
+```
 
 :::(Info) ()
 To disable the validation of request body size against this parameter, set it to `0`. We do not recommended disabling it.
@@ -442,7 +457,14 @@ Defines the list of *Endpoints* to access the *Application*.
 The format of the key  is `domain[:port]`. The key must be project-wide unique.
 * `groups: applications: endpoints: store:` defines the *Store* as context to process requests within.
 * `groups: applications: endpoints: services:` defines the *Store*-specific settings for services. Only `session:` is currently allowed here. See [Services](#services) to learn more.
-* `groups: applications: endpoints: cors-allow-origin:` defines a CORS header. It is allowed for `glue` application only. Possible values are `single domain as string` or `*` to allow all domains.
+* `groups: applications: endpoints: cors-allow-origin:` defines a [CORS header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin). It is allowed for `glue` application only. Possible values are:
+  * Single domain as a string
+  * `*` – allows all domains
+  :::(Info) (Allowing all domains)
+  For security reasons, we recommend allowing all domains only as a temporary workaround. As a permanent solution:
+  * Define the desired domains as separate endpoints with separate CORS headers.
+  * Define the desired domains on the application level
+  :::
 
 ### services: endpoints:
 Defines the list of *Endpoints* to access a *Service* for development or monitoring needs. The format of the key  is `domain[:port]`. The key must be project-wide unique.
@@ -481,6 +503,9 @@ Defines the [New Relic](https://documentation.spryker.com/docs/services#new-reli
 * `docker: newrelic: license:` - defines a New Relic license. Aquire it from [New Relic](https://www.newrelic.com/).
 * `docker: newrelic: appname:` - defines a New Relic application name. This variable is optional and does not have a default value.
 * `docker: newrelic: enabled:` - defines if Newrelic is enabled. Possible values are `true` and `false`. This variable is optional with the default value of `true`.
+* `docker: newrelic: distributed-tracing: enabled` - defines if [New Relic distributed tracing](https://docs.newrelic.com/docs/agents/php-agent/features/distributed-tracing-php-agent/) is enabled. Possible values are `true` and `false`.
+* `docker: newrelic: distributed-tracing: exclude-newrelic-header` - defines if New Relic distributed tracing headers are enabled. Possible values are `true` and `false`. For information about the headers, see [How trace context is passed between applications](https://docs.newrelic.com/docs/distributed-tracing/concepts/how-new-relic-distributed-tracing-works/#headers).
+* `docker: newrelic: transaction-tracer: threshold` - defines the New Relic transaction tracer threshold. Accepts numeric values starting from `0`. For information about the threshold, see [Configure transaction traces](https://docs.newrelic.com/docs/apm/transactions/transaction-traces/configure-transaction-traces/).
 
 ```yaml
 docker:
@@ -673,6 +698,7 @@ A key-value store *Service* for storing business data.
 * Project-wide
 
   * `key_value_store: engine:` - possible value is: `redis`.
+  * `key_value_store: replicas: number:` - defines the number of replicas. The default value is `0`.
   * `session: endpoints:` - defines the service's port that can be accessed via given endpoints.
 
 * Store-specific
