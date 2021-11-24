@@ -1,9 +1,4 @@
-> Audience:
->
-> - Everyone who needs access to private repositories for development or running production with the Docker SDK.
->
-> Outcome:
-> - You know how to configure an environment to allow the Docker SDK access private repositories.
+# Configuring access to private repositories
 
 This document describes how to configure an environment to allow the Docker SDK access private repositories.
 
@@ -68,7 +63,7 @@ eval $(ssh-agent)
 ssh-add -K ~/.ssh/id_rsa
 ```
 
-3. MacOS and Windows: For Docker Desktop to fetch the changes, restart the OS. 
+3. MacOS and Windows: For Docker Desktop to fetch the changes, restart the OS.
 
 
 4. Re-build the application:
@@ -119,11 +114,11 @@ To learn about Composer authentication variables, see [COMPOSER_AUTH](https://ge
 
 * Export the environment variable taking Bash escaping rules into consideration:
 ```bash
-export COMPOSER_AUTH="{\"github-oauth\":{\"github.com\":\"{GITHUB_TOKEN}\"},\"gitlab-oauth\":{\"gitlab.com\":\"{GITLAB_TOKEN}\"},\"bitbucket-oauth\":{\"bitbucket.org\": {\"consumer-key\": \"{BITBUCKET_KEY}\", \"consumer-secret\": \"{BITBUCKET_SECRET}\"}}}"
+export COMPOSER_AUTH='{\"github-oauth\":{\"github.com\":\"{GITHUB_TOKEN}\"},\"gitlab-oauth\":{\"gitlab.com\":\"{GITLAB_TOKEN}\"},\"bitbucket-oauth\":{\"bitbucket.org\": {\"consumer-key\": \"{BITBUCKET_KEY}\", \"consumer-secret\": \"{BITBUCKET_SECRET}\"}}}'
 ```
 * Add the environment variable to your development environment by editing `~/.bash_profile` or `~/.zshenv`:
 ```bash
-export COMPOSER_AUTH="{\"github-oauth\":{\"github.com\":\"{GITHUB_TOKEN}\"},\"gitlab-oauth\":{\"gitlab.com\":\"{GITLAB_TOKEN}\"},\"bitbucket-oauth\":{\"bitbucket.org\": {\"consumer-key\": \"{BITBUCKET_KEY}\", \"consumer-secret\": \"{BITBUCKET_SECRET}\"}}}"
+export COMPOSER_AUTH='{\"github-oauth\":{\"github.com\":\"{GITHUB_TOKEN}\"},\"gitlab-oauth\":{\"gitlab.com\":\"{GITLAB_TOKEN}\"},\"bitbucket-oauth\":{\"bitbucket.org\": {\"consumer-key\": \"{BITBUCKET_KEY}\", \"consumer-secret\": \"{BITBUCKET_SECRET}\"}}}'
 ```
 
 4. Re-build the application:
@@ -133,4 +128,3 @@ docker/sdk up --build
 ```
 
 You've configured authentication to your private repositories.
-

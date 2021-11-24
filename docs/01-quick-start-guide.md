@@ -1,8 +1,4 @@
-> Audience:
-> - Everyone who is not familiar with the Docker SDK.
->
-> Outcome:
-> - You know how to quickly set up Spryker in a local environment.
+# Quick start guide
 
 This document describes how you can quickly set up a local environment with the Docker SDK.
 
@@ -90,7 +86,7 @@ For solutions to common issues, see [Troubleshooting](09-troubleshooting.md).
 
 
 ## What documents should I use to start developing and configuring my project?
-[02-development-usage]
-[99-deploy.file.reference.v1.md]
-[10-configuration-reference.md]
-[06-configuring-services.md]
+<!--- [02-development-usage] --->
+[Deploy file reference — 1.0](99-deploy-file-reference.md)
+[Configuration reference](10-configuration-reference.md)
+[Configuring servces](06-configuring-services.md)
