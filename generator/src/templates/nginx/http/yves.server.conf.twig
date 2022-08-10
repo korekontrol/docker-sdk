@@ -21,3 +21,52 @@
         fastcgi_param SPRYKER_MAIL_SENDER_NAME "{{ storeServices['mail']['sender']['name'] }}";
 {% endif %}
 {% endblock location %}
+{% block locations %}
+{{ parent() }}
+{% if endpointData['prometheus_metrics'] is not empty %}
+    location /prometheus/metrics {
+
+{% if endpointData['prometheus_metrics']['real-ip'] is not empty %}
+{% include "nginx/modules/real-ip.conf.twig"  with {
+    realIp: endpointData['prometheus_metrics']['real-ip'] | default({}),
+} %}
+{% endif %}
+{% if endpointData['prometheus_metrics']['auth'] is not empty %}
+{% include "nginx/auth/basic.conf.twig" with {
+  auth: endpointData['prometheus_metrics']['auth'] | default({}),
+  host: endpointData['prometheus_metrics']['auth_file_from_host'],
+} %}
+{% endif %}
+        try_files $uri @proxy;
+    }
+{% endif %}
+{% if endpointData['maintenance_mode'] is not empty %}
+    ###
+    ### Rewrite rules - maintenance
+    ###
+    ###
+
+    set $maintenance off;
+    if (-f /tmp/maintenance/enable) {
+        set $maintenance on;
+    }
+{% if endpointData['maintenance_mode_bypass_regex'] is not empty %}
+    if ($remote_addr ~ {{ endpointData['maintenance_mode_bypass_regex'] }}) {
+        set $maintenance off;
+    }
+{% endif %}
+    if ($bypass_maintenance = on) {
+        set $maintenance off;
+    }
+    if ($uri = /health-check) {
+        set $maintenance off;
+    }
+    if ($maintenance = on) {
+        return 503;
+    }
+    error_page 503 @maintenance;
+    location @maintenance {
+        root /data/kore/maintenance;
+        rewrite ^(.*)$ /index.html break;
+    }
+{% endblock locations %}
