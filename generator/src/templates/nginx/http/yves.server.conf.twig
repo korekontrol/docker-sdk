@@ -63,7 +63,7 @@
     }
     error_page 503 @maintenance;
     location @maintenance {
-        root /data/kore/maintenance;
+        root /data/public/Yves/maintenance;
         rewrite ^(.*)$ /index.html break;
     }
 {% endif %}
