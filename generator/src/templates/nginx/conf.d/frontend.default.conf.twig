@@ -22,6 +22,12 @@ geo $is_whitelisted_ip {
 {% endfor %}
 {% endif %}
 
+# Check for BYPASS_MAINTENANCE cookie
+map $http_cookie $bypass_maintenance {
+  default "off";
+  ~BYPASS_MAINTENANCE=1 "on";
+}
+
 server {
     server_name _ default; # This is just an invalid value which will never trigger on a real hostname.
     listen 80;
