@@ -13,10 +13,7 @@
         fastcgi_param SPRYKER_API_HOST "{{ host }}";
         fastcgi_param SPRYKER_API_PORT "{{ externalPort }}";
         fastcgi_param SPRYKER_GLUE_APPLICATION_CORS_ALLOW_ORIGIN "{{ endpointData['cors-allow-origin'] | default('') | nginx_var }}";
-<<<<<<< HEAD
-=======
         
->>>>>>> c112de0 (Update glue.server.conf.twig)
         fastcgi_param HTTP_AUTHORIZATION "";
 
 {% if storeServices['mail']['sender']['email'] is not empty %}
