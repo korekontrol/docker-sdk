@@ -6,11 +6,7 @@ ENV TIDEWAYS_ENVIRONMENT=$TIDEWAYS_ENVIRONMENT_DEFAULT
 RUN apt update -y && apt install -yq --no-install-recommends gnupg2 curl sudo ca-certificates wget
 
 RUN echo 'deb https://packages.tideways.com/apt-packages-main any-version main' > /etc/apt/sources.list.d/tideways.list && \
-<<<<<<< HEAD
     wget -qO - 'https://packages.tideways.com/key.gpg' | apt-key add -
-=======
-    wget -qO - https://packages.tideways.com/key.gpg | sudo apt-key add -
->>>>>>> a6dfcfe (Upgrade tideways repository)
 RUN DEBIAN_FRONTEND=noninteractive apt update -y && apt install -yq tideways-daemon && \
     apt autoremove --assume-yes && \
     apt clean && \
