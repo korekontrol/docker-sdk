@@ -13,6 +13,15 @@ RUN bash -c 'if [ ${BLACKFIRE_EXTENSION_ENABLED} = 1 ]; then \
     && mv /tmp/blackfire/blackfire /usr/bin/blackfire \
     && rm -Rf /tmp/blackfire; fi'
 
+# Tideways CLI
+RUN bash -c 'if [ ${TIDEWAYS_EXTENSION_ENABLED} = 1 ]; then \
+    mkdir -p /tmp/tideways-cli \
+    && architecture=$(case $(uname -m) in i386 | i686 | x86) echo "i386" ;; x86_64 | amd64) echo "amd64" ;; aarch64 | arm64 | armv8) echo "arm64" ;; *) echo "amd64" ;; esac) \
+    && wget -qO- -U "Docker" https://tideways.s3.amazonaws.com/cli/1.2.2/tideways-cli_linux_${architecture}-1.2.2.tar.gz | tar zxp -C /tmp/tideways-cli \
+    && mv /tmp/tideways-cli/tideways-cli_1.2.2/tideways /usr/bin/tideways \
+    && chmod 755 /usr/bin/tideways \
+    && rm -Rf /tmp/tideways-cli; fi'
+
 ENV PATH=/data/vendor/bin:$PATH
 
 RUN --mount=type=cache,id=aptlib,sharing=locked,target=/var/lib/apt \
