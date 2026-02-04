@@ -11,6 +11,9 @@ server {
 {% if ssl %}
     include /etc/nginx/vhost.d/ssl.default.conf;
 {% endif %}
+{% if ssl and ssl_client_pass %}
+    ssl_verify_client optional_no_ca;
+{% endif %}
 {% block locations %}
     location / {
 {% block location %}
@@ -18,6 +21,11 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
+
+        {% if ssl and ssl_client_pass %}
+        proxy_set_header X-SSL-CERT $ssl_client_escaped_cert;
+        proxy_set_header X-SSL-Verify $ssl_client_verify;
+        {% endif %}
 
         set $upstream http://{% block upstream %}{{ upstream }}{% endblock upstream %};
         proxy_pass $upstream;
