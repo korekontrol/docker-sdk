@@ -1,9 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 require docker
 
 import environment/docker.sh
 import environment/docker-compose.sh
+import environment/mutagen-version-check.sh
 
 Registry::addCommand "boot" "Command::bootstrap"
 Registry::addCommand "bootstrap" "Command::bootstrap"
@@ -76,6 +77,17 @@ function Command::bootstrap() {
 
     local USER_FULL_ID=$(Environment::getFullUserId)
 
+    local CERT_DIR="${HOME}/.spryker/certs"
+    mkdir -p "${CERT_DIR}"
+
+    KEY_FILE="${CERT_DIR}/${SPR_CUSTOM_KEY:-default.key}"
+    CRT_FILE="${CERT_DIR}/${SPR_CUSTOM_CERT:-default.crt}"
+
+    if [[ -f "${KEY_FILE}" && -f "${CRT_FILE}" ]]; then
+        cp "${CERT_DIR}/default.key" "${SOURCE_DIR}/generator/openssl/default.key"
+        cp "${CERT_DIR}/default.crt" "${SOURCE_DIR}/generator/openssl/default.crt"
+    fi
+
     Console::verbose::start "Building generator..."
     docker build -t spryker_docker_sdk \
         -f "${SOURCE_DIR}/generator/Dockerfile" \
@@ -84,7 +96,7 @@ function Command::bootstrap() {
         "${SOURCE_DIR}/generator" >/dev/null
     Console::end "[DONE]"
 
-    Console::verbose::start "Copiyng assets..."
+    Console::verbose::start "Copying assets..."
     cp -rf "${SOURCE_DIR}/bin" "${tmpDeploymentDir}/bin"
     cp -rf "${SOURCE_DIR}/context" "${tmpDeploymentDir}/context"
     cp -rf "${SOURCE_DIR}/bin/standalone" "${tmpDeploymentDir}/context/cli"
@@ -96,7 +108,12 @@ function Command::bootstrap() {
     fi
     if [ -d "${projectDeployTemplatesDirectory}" ]; then
         cp -rf "${projectDeployTemplatesDirectory}" "${tmpDeploymentDir}/project-deploy-templates"
+        if [ -d "${projectDeployTemplatesDirectory}services/" ]; then
+            cp -rf "${projectDeployTemplatesDirectory}services/"* "${tmpDeploymentDir}/context/" 2>/dev/null || true
+        fi
     fi
+    [ -f "./.env" ] && { mkdir -p "${tmpDeploymentDir}/env" && cp "./.env" "${tmpDeploymentDir}/env/.env"; } || { mkdir -p "${tmpDeploymentDir}/env" && touch "${tmpDeploymentDir}/env/.env"; }
+
     Console::end "[DONE]"
 
     Console::info "${INFO}Running generator${NC}"
@@ -106,11 +123,15 @@ function Command::bootstrap() {
     if [ "${USER_FULL_ID%%:*}" != '0' ]; then
         userToRun=()
     fi
+
+    local dockerVersion=`docker version --format json`
+
     docker run -i --rm "${userToRun[@]}" \
         -e SPRYKER_PLATFORM_IMAGE="${SPRYKER_PLATFORM_IMAGE:-""}" \
         -e SPRYKER_DOCKER_SDK_PLATFORM="${_PLATFORM}" \
         -e SPRYKER_DOCKER_SDK_DEPLOYMENT_DIR="${DESTINATION_DIR}" \
         -e VERBOSE="${VERBOSE}" \
+        -e DOCKER_VERSION="${dockerVersion}" \
         -v "${tmpDeploymentDir}":/data/deployment:rw \
         spryker_docker_sdk
 
@@ -126,6 +147,14 @@ function Command::bootstrap() {
         cp "${SOURCE_DIR}/.dockerignore.default" .dockerignore
     fi
 
+    Console::info "${DESTINATION_DIR}"
+
+    if [[ ! -f "${KEY_FILE}" || ! -f "${CRT_FILE}" ]]; then
+        cp "${DESTINATION_DIR}/context/nginx/ssl/ca.key" "${CERT_DIR}/default.key"
+        cp "${DESTINATION_DIR}/context/nginx/ssl/ca.crt" "${CERT_DIR}/default.crt"
+    fi
+
+
     Console::info "Deployment is generated into ${LGRAY}${DESTINATION_DIR}"
     Console::log "Use ${OK}docker/sdk$([ "${SPRYKER_PROJECT_NAME}" != 'default' ] && echo -n " -p ${SPRYKER_PROJECT_NAME}") up${NC} to start the application."
     Console::log ''
@@ -140,6 +169,7 @@ function Command::bootstrap::_deploy() {
 
     [ -d "${DESTINATION_DIR}" ] && rm -rf "${DESTINATION_DIR:?}/*"
     [ ! -d "${DESTINATION_DIR}" ] && mkdir "${DESTINATION_DIR}"
+    [ -L "${DESTINATION_DIR}/bin" ] && rm -f "${DESTINATION_DIR}/bin"
     cp -R "${tmpDeploymentDir}/." "${DESTINATION_DIR}"
     rm -rf "${tmpDeploymentDir}"
 }

@@ -11,11 +11,14 @@ This document describes configuration options of the services shipped with Spryk
 *     [Redis](#redis)
 *     [Redis GUI](#redis-gui)
 *     [MailHog](#mailhog)
+*     [Mailpit](#mailpit)
 *     [Blackfire](#blackfire)
 *     [New Relic](#new-relic)
 *     [WebDriver](#webdriver)
 *     [Dashboard](#dashboard)
 *     [Tideways](#tideways)
+*     [Local OpenTelemetry Stack](#grafana)
+*     [Custom Services](#custom-services)
 
 
 ## Prerequisites
@@ -62,7 +65,7 @@ Follow the steps below to switch the database service to MariaDB:
 services:
     database:
         engine: mysql
-        version: mariadb-10.4
+        version: mariadb-10.11
         ...
         endpoints:
             localhost:3306:
@@ -155,7 +158,7 @@ docker/sdk up
 
 ## OpenSearch
 
-[OpenSearch](https://opensearch.org/docs/1.3/) is a search engine based on the Lucene library. It provides a distributed, multitenant-capable full-text search engine with an HTTP web interface and schema-free JSON documents.
+[OpenSearch](https://opensearch.org/docs/latest/) is a search engine based on the Lucene library. It provides a distributed, multitenant-capable full-text search engine with an HTTP web interface and schema-free JSON documents. Supported versions: 1.3, 2.19, 3.5.
 
 ### Configuration
 
@@ -228,6 +231,24 @@ services:
 docker/sdk boot deploy.*.yml &&\
 docker/sdk up
 ```
+
+### Migrating to RabbitMQ 4.1 in Production
+
+When upgrading to RabbitMQ 4.1 in production environments, follow these steps to ensure a safe migration:
+
+{% info_block infoBox %}
+RabbitMQ 3.13 is the last version before 4.1. Make sure you are running version 3.13 before upgrading to 4.1.
+{% endinfo_block %}
+
+#### Migration Steps
+
+1. **Ensure you are on RabbitMQ 3.13**: Verify that your current RabbitMQ version is 3.13, which is the last version before 4.1.
+
+2. **Stop Jenkins**: Before proceeding with the migration, stop all Jenkins jobs and the Jenkins service to prevent any message processing during the upgrade:
+
+3. **Apply changes**: Apply the necessary configuration changes to update the RabbitMQ service to the new version.
+
+4. **Restart Jenkins**: Once the migration is complete and verified, restart the Jenkins service.
 
 ## Swagger UI
 
@@ -327,7 +348,7 @@ With the MailHog service, developers can:
 
 :::(Info) ()
 By default the following applies:
-*  `http://mail.demo-spryker.com/` is used to see incoming emails.
+*  `http://mail.spryker.local/` is used to see incoming emails.
 * Login is not required
 :::
 ### Configuration
@@ -338,6 +359,37 @@ services:
         ...
         mail_catcher:
                 engine: mailhog
+                endpoints:
+                          {custom_endpoint}:
+```
+2. Bootstrap the docker setup and rebuild the application:
+```bash
+docker/sdk boot deploy.*.yml &&\
+docker/sdk up
+```
+
+## Mailpit
+
+[Mailpit](https://github.com/axllent/mailpit) is a mail catcher service that is used with Spryker in Docker for Demo and Development environments. Developers use this email testing tool to catch and show emails locally without an SMTP (Simple Mail Transfer Protocol) server.
+
+With the Mailpit service, developers can:
+
+* configure an application to use Mailpit for SMTP delivery;
+* view messages in the web UI or retrieve them via JSON API.
+
+:::(Info) ()
+By default the following applies:
+*  `http://mail.spryker.local/` is used to see incoming emails.
+* Login is not required
+  :::
+### Configuration
+
+1. Adjust `deploy.*.yml` in the `services:` section to specify a custom endpoint:
+```yaml
+services:
+        ...
+        mail_catcher:
+                engine: mailpit
                 endpoints:
                           {custom_endpoint}:
 ```
@@ -358,7 +410,7 @@ Follow the steps to enable Blackfire:
 
 ```yaml
 image:
-    tag: spryker/php:7.3 # Use the same tag you had in `image:`
+    tag: spryker/php:8.3 # Use the same tag you had in `image:`
     php:
         ...
         enabled-extensions:
@@ -394,7 +446,7 @@ Follow the steps to enable Blackfire:
 
 ```yaml
 image:
-    tag: spryker/php:7.3 # Use the same tag you had in `image:`
+    tag: spryker/php:8.3 # Use the same tag you had in `image:`
     php:
         ...
         enabled-extensions:
@@ -528,7 +580,7 @@ docker/sdk up
 
 By default, in the New Relic dashboard, the APM is displayed as `company-staging-newrelic-app`. To improve visibility, you may want to configure each application as a separate APM. For example, `YVES-DE (docker.dev)`.
 
-To do it, adjust the Monitoring service in `src/Pyz/Service/Monitoring/MonitoringDependencyProvider.php`:  
+To do it, adjust the Monitoring service in `src/Pyz/Service/Monitoring/MonitoringDependencyProvider.php`:
 
 ```php
 <?php declare(strict_types = 1);
@@ -655,3 +707,364 @@ tideways:
 docker/sdk boot deploy.*.yml &&\
 docker/sdk up
 ```
+
+## Local OpenTelemetry Stack
+
+The Local OpenTelemetry Stack is a powerful tool designed for real-time monitoring of Application Performance Monitoring (APM) locally. It allows you to track APM traces across all containers or specific ones running PHP applications.
+
+This stack integrates the following containers into your local environment:
+* tempo-init
+* tempo
+* collector
+* prometheus
+* grafana
+
+### Configuration
+
+1. Adjust your `deploy.*.yml` as follows:
+
+```yaml
+    grafana:
+        engine: otel-stack
+        endpoints:
+            grafana:
+```
+
+2. Bootstrap the docker setup and rebuild the application:
+```bash
+docker/sdk boot deploy.*.yml &&\
+docker/sdk up
+```
+
+## Custom Services
+
+Custom services allow you to integrate any Docker-based service into your Spryker environment. This is useful for adding third-party services like AWS LocalStack, MinIO, Kafka, etc.
+
+:::(Warning) (Local Development Only)
+**Important:** Custom services are **only available in local development environments**. They will **NOT** be automatically propagated or available in Cloud environments (staging, production). Custom services are designed for local development, testing, and mocking purposes only.
+:::
+
+### Use Cases
+
+Custom services support two primary use cases:
+
+1. **Pre-built Docker images** - Use existing images from Docker Hub or private registries
+2. **Custom Dockerfile builds** - Build services from your own Dockerfiles with project-specific configurations
+
+### Configuration Options
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `engine` | Yes | Must be set to `custom` |
+| `image` | No* | Docker image to use (e.g., `nginx:alpine`) |
+| `build` | No* | Build configuration for custom Dockerfile |
+| `build.context` | Yes** | Build context path or service name |
+| `build.dockerfile` | No | Dockerfile name (defaults to `Dockerfile`) |
+| `build.args` | No | Build arguments as key-value pairs |
+| `endpoints` | No | HTTP/TCP endpoints for the service |
+| `port` | No | Internal port the service listens on |
+| `environment` | No | Environment variables |
+| `volumes` | No | Volume mounts |
+| `command` | No | Override container command |
+| `healthcheck` | No | Health check configuration |
+| `depends_on` | No | Service dependencies |
+| `persistent` | No | Enable persistent volume (default: `true`) |
+
+\* Either `image` or `build` must be specified  
+\** Required when using `build`
+
+### Use Case 1: Pre-built Docker Image
+
+Use this approach when you want to run an existing Docker image without modifications.
+
+#### Example: AWS LocalStack
+
+```yaml
+services:
+    localstack:
+        engine: custom
+        image: localstack/localstack:latest
+        endpoints:
+            localstack.spryker.local:
+        port: 4566
+        environment:
+            SERVICES: s3,sqs,lambda,dynamodb,sns,ses
+            DEBUG: "1"
+        volumes:
+            - localstack-data:/var/lib/localstack
+```
+
+### Use Case 2: Custom Dockerfile Build
+
+Use this approach when you need to build a custom Docker image with project-specific configurations.
+
+#### Project Structure
+
+Place your Dockerfile and related files in the `config/deploy-templates/services/` directory:
+
+```
+project-root/
+├── config/
+│   └── deploy-templates/
+│       ├── services/                  # Service contexts for custom services
+│       │   ├── my-service/
+│       │   │   ├── Dockerfile
+│       │   │   └── config.yml (optional)
+│       │   └── localstack/            # Example: LocalStack configuration
+│       │       ├── localstack.conf
+│       │       └── init-aws.sh
+├── deploy.*.yml
+└── ...
+```
+
+The `config/deploy-templates/services/` directory contents are automatically copied to the deployment context during `docker/sdk boot`.
+
+#### Example: LocalStack with Configuration Files
+
+:::(Warning) (Cloud Deployment)
+**Remember:** This example and all custom services are for **local development only**. They will **NOT** be deployed to Cloud environments automatically. Configure Cloud services separately through your infrastructure.
+:::
+
+Here's a complete example of a custom service with configuration files:
+
+**Project structure:**
+```
+config/deploy-templates/services/localstack/
+├── localstack.conf    # LocalStack configuration
+└── init-aws.sh        # Initialization script
+```
+
+**Configuration file (`localstack.conf`):**
+```ini
+# LocalStack Configuration
+[default]
+# Services to enable
+services = s3,sqs,lambda,dynamodb,sns,ses
+
+# Debug mode
+debug = 1
+
+# Data directory
+data_dir = /var/lib/localstack/data
+
+# Persistence
+persistence = 1
+
+# Lambda
+lambda_executor = local
+lambda_runtime_executor = docker
+
+# S3
+s3_fix_content_type = 1
+```
+
+**Initialization script (`init-aws.sh`):**
+```bash
+#!/bin/bash
+# LocalStack initialization script
+set -e
+
+echo "Initializing LocalStack..."
+
+# Wait for LocalStack to be ready
+until aws --endpoint-url=http://localhost:4566 s3 ls; do
+  echo "Waiting for LocalStack..."
+  sleep 2
+done
+
+echo "LocalStack is ready!"
+
+# Create S3 buckets
+aws --endpoint-url=http://localhost:4566 s3 mb s3://test-bucket || true
+
+# Create SQS queues
+aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name test-queue || true
+
+# Create DynamoDB tables
+aws --endpoint-url=http://localhost:4566 dynamodb create-table \
+  --table-name test-table \
+  --attribute-definitions AttributeName=id,AttributeType=S \
+  --key-schema AttributeName=id,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST || true
+
+echo "LocalStack initialization complete!"
+```
+
+**Deploy file configuration (`deploy.*.yml`):**
+```yaml
+services:
+    localstack:
+        engine: custom
+        image: localstack/localstack:latest
+        endpoints:
+            localstack.spryker.local:
+        port: 4566
+        environment:
+            SERVICES: s3,sqs,lambda,dynamodb,sns,ses
+            DEBUG: "1"
+            DATA_DIR: /var/lib/localstack/data
+            LOCALSTACK_CONFIG_FILE: /etc/localstack/localstack.conf
+        volumes:
+            - localstack-data:/var/lib/localstack
+            - ./${DEPLOYMENT_PATH}/context/localstack/localstack.conf:/etc/localstack/localstack.conf:ro
+            - ./${DEPLOYMENT_PATH}/context/localstack/init-aws.sh:/etc/localstack/init-aws.sh:ro
+```
+
+The configuration files are automatically copied from `config/deploy-templates/services/localstack/` to the deployment context and mounted into the container.
+
+#### Configuration
+
+```yaml
+services:
+    my-service:
+        engine: custom
+        build:
+            context: my-service        # Auto-resolves to context/my-service/
+            dockerfile: Dockerfile     # Optional, defaults to "Dockerfile"
+            args:                      # Optional build arguments
+                BUILD_VERSION: "1.0.0"
+                NODE_ENV: production
+        endpoints:
+            my-service.spryker.local:
+        port: 8080
+        environment:
+            APP_ENV: development
+            LOG_LEVEL: debug
+        volumes:
+            - my-service-data:/data
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+```
+
+#### Build Context Resolution
+
+The `build.context` value is automatically resolved:
+
+| Value | Resolves To |
+|-------|-------------|
+| `my-service` | `./${DEPLOYMENT_PATH}/context/my-service/` |
+| `context/my-service` | `./${DEPLOYMENT_PATH}/context/my-service` |
+
+#### Example Dockerfile
+
+```dockerfile
+FROM node:18-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+
+EXPOSE 8080
+
+CMD ["node", "server.js"]
+```
+
+### Endpoint Configuration
+
+#### HTTP Endpoints
+
+HTTP endpoints are automatically proxied through the Nginx gateway:
+
+```yaml
+endpoints:
+    my-service.spryker.local:
+```
+
+Access via: `http://my-service.spryker.local`
+
+#### TCP Endpoints
+
+For services that require direct TCP access (databases, message brokers):
+
+```yaml
+endpoints:
+    localhost:9092:
+        protocol: tcp
+```
+
+Access via: `localhost:9092`
+
+### Health Checks
+
+Configure health checks to ensure service availability:
+
+```yaml
+healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+```
+
+Or using shell commands:
+
+```yaml
+healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres || exit 1"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+```
+
+### Volumes
+
+#### Named Volumes (Persistent)
+
+```yaml
+volumes:
+    - my-service-data:/data
+```
+
+Named volumes are automatically declared and persisted across container restarts.
+
+#### Bind Mounts
+
+```yaml
+volumes:
+    - ./config/my-service:/app/config:ro
+```
+
+### Disabling Persistent Storage
+
+To disable the default persistent volume:
+
+```yaml
+my-service:
+    engine: custom
+    image: nginx:alpine
+    persistent: false
+```
+
+### Applying Changes
+
+After modifying custom services configuration:
+
+```bash
+docker/sdk boot deploy.*.yml
+docker/sdk up --build
+```
+
+### Troubleshooting
+
+#### Service Not Accessible
+
+1. Check if the service is running: `docker/sdk ps`
+2. Check service logs: `docker/sdk logs my-service`
+3. Verify endpoint configuration and `port` value matches the service's listening port
+
+#### Build Fails
+
+1. Ensure Dockerfile exists in `config/deploy-templates/services/{service-name}/`
+2. Check build context path is correct
+3. Review build logs for errors
+
+#### Volume Errors
+
+1. For "undefined volume" errors, ensure volume names don't contain special characters
+2. Named volumes are automatically declared; bind mounts must reference existing paths

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # shellcheck disable=SC2034
 set -e
@@ -85,6 +85,11 @@ import service/database/{{ services['database']['engine'] | default('mysql') }}.
 import service/broker/{{ services['broker']['engine'] | default('rabbitmq') }}.sh
 import service/scheduler/{{ services['scheduler']['engine'] | default('jenkins') }}.sh
 
+{% if _isAcpLocalDevelopmentEnabled %}
+# ACP
+[[ -f "{{ image['environment']['ACP_DOCKER_SDK_FILE'] }}" ]] && source "{{ image['environment']['ACP_DOCKER_SDK_FILE'] }}"
+{% endif %}
+
 # Implementation
 import sdk/compose.sh
 import sdk/data/demo.sh
@@ -123,6 +128,7 @@ readonly SPRYKER_DOCKER_TAG="{{ tag | default('1.0') }}"
 readonly SPRYKER_FRONTEND_IMAGE="{{ assets['image'] | default('nginx:alpine') }}"
 readonly SPRYKER_COMPOSER_MODE="{{ composer.mode | default('') }}"
 readonly SPRYKER_COMPOSER_AUTOLOAD="{{ composer.autoload | default('') }}"
+readonly SPRYKER_COMPOSER_VERBOSE="{{ composer.verbose is defined ? composer.verbose : '-vvv' }}"
 readonly SPRYKER_LOG_DIRECTORY="{{ docker['logs']['path'] | default('/var/log/spryker') }}"
 readonly SPRYKER_ASSETS_MODE="{{ assets['mode'] | default('development') }}"
 readonly SPRYKER_DB_ENGINE="{{ services['database']['engine'] == 'mysql' ? 'mysql' : 'pgsql' }}"
@@ -133,6 +139,7 @@ readonly SPRYKER_DEFAULT_REGION="{{ regions | keys | first }}"
 {% endif %}
 readonly SPRYKER_FILE_MODE="{{ _fileMode }}"
 readonly SPRYKER_XDEBUG_MODE_ENABLE="{{ docker['debug']['xdebug']['enabled'] is not defined or docker['debug']['xdebug']['enabled'] == true ? '1' : '' }}"
+readonly SPRYKER_CUSTOM_XDEBUG_HOST_IP="{{ docker['debug']['xdebug']['custom_host_ip'] | default('') }}"
 readonly SPRYKER_SYNC_SESSION_NAME="{{ _syncSessionName }}"
 readonly SPRYKER_SYNC_VOLUME="${SPRYKER_DOCKER_PREFIX}_${SPRYKER_DOCKER_TAG}_data_sync"
 readonly DOCKER_COMPOSE_FILES_EXTRA="{{ docker['compose']['yamls'] | default([]) | join(' ') }}"
@@ -178,7 +185,7 @@ readonly SSH_AUTH_SOCK_IN_CLI="$([ -n "${SSH_AUTH_SOCK}" ] && [ -z "${COMPOSER_A
 
 # Global variables
 readonly USER_FULL_ID=$(Environment::getFullUserId)
-readonly SPRYKER_XDEBUG_HOST_IP=$(Environment::getHostIp)
+readonly SPRYKER_XDEBUG_HOST_IP=${SPRYKER_CUSTOM_XDEBUG_HOST_IP:-$(Environment::getHostIp)}
 readonly SECRETS_ENVIRONMENT=("COMPOSER_AUTH='${COMPOSER_AUTH}'")
 
 command=${1}
@@ -212,6 +219,14 @@ while getopts ":xvt" opt; do
 done
 shift $((OPTIND - 1))
 
+for arg in "$@"; do
+  case "$arg" in
+    -q|--quiet|--quiet-meta)
+      SPRYKER_QUIET_MODE=1
+      ;;
+  esac
+done
+
 # Exporting for docker-compose
 export DEPLOYMENT_PATH
 export SPRYKER_XDEBUG_HOST_IP
@@ -222,6 +237,7 @@ export SPRYKER_DOCKER_TAG
 export SPRYKER_TESTING_ENABLE
 export SPRYKER_XDEBUG_MODE_ENABLE
 export SPRYKER_XDEBUG_ENABLE
+export SPRYKER_QUIET_MODE
 export SPRYKER_LOG_DIRECTORY
 export SPRYKER_BUILD_HASH
 export SPRYKER_BUILD_DATE
@@ -236,6 +252,14 @@ export TIDEWAYS_ENVIRONMENT_NAME=${TIDEWAYS_ENVIRONMENT_NAME}
 
 {# For avoid https://github.com/docker/compose/issues/9104 #}
 export DOCKER_COMPOSE_TTY_DISABLED="$(Environment::getDockerComposeTTY)"
+
+{% if _isAcpLocalDevelopmentEnabled %}
+# ACP
+export ACP_AWS_ENDPOINT={{ image['environment']['AWS_ENDPOINT'] | default('http://localhost:4566') }}
+export ACP_AWS_REGION={{ image['environment']['AWS_DEFAULT_REGION'] | default('eu-central-1') }}
+export ACP_AWS_ACCESS_KEY_ID={{ image['environment']['AWS_ACCESS_KEY_ID'] | default('test') }}
+export ACP_AWS_SECRET_ACCESS_KEY={{ image['environment']['AWS_SECRET_ACCESS_KEY'] | default('test') }}
+{% endif %}
 
 Registry::Flow::runBoot
 

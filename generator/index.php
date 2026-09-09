@@ -62,9 +62,19 @@ $envVarEncoder = new class() {
         $this->isActive = $isActive;
     }
 };
+$yamlVarEncoder = new class() {
+    public function encode($value)
+    {
+        if (is_array($value)) {
+            return json_encode($value, JSON_UNESCAPED_SLASHES);
+        }
+        return json_encode((string)$value, JSON_UNESCAPED_SLASHES);
+    }
+};
 $twig->addFilter(new TwigFilter('tf_var', [$tfVarEncoder, 'encode'], ['is_safe' => ['all']]));
 $twig->addFilter(new TwigFilter('env_var', [$envVarEncoder, 'encode'], ['is_safe' => ['all']]));
 $twig->addFilter(new TwigFilter('nginx_var', [$nginxVarEncoder, 'encode'], ['is_safe' => ['all']]));
+$twig->addFilter(new TwigFilter('yaml_var', [$yamlVarEncoder, 'encode'], ['is_safe' => ['all']]));
 $twig->addFilter(new TwigFilter('normalize_endpoint', static function ($string) {
     return str_replace(['.', ':'], ['dot', '_'], $string);
 }, ['is_safe' => ['all']]));
@@ -103,6 +113,11 @@ $isAutoloadCacheEnabled = $projectData['_isAutoloadCacheEnabled'] = isAutoloadCa
 $projectData['_requirementAnalyzerData'] = buildDataForRequirementAnalyzer($projectData);
 $projectData['secrets'] = buildSecrets($deploymentDir);
 $projectData = buildDefaultCredentials($projectData);
+$projectData['_isAcpLocalDevelopmentEnabled'] = isAcpLocalDevelopmentEnabled($projectData);
+
+$dockerVersionObject = json_decode(getenv('DOCKER_VERSION', '{}'));
+$skipVersionHeader = version_compare($dockerVersionObject?->Client?->Version, '26.0.0', '>=');
+$projectData['_skipVersionHeader'] = $skipVersionHeader;
 
 // TODO Make it optional in next major
 // Making webdriver as required service for BC reasons
@@ -162,8 +177,9 @@ const ENTRY_POINTS = [
     GLUE_BACKEND => 'GlueBackend',
 ];
 
-const DEBIAN_DISTRO_NAME = 'bullseye';
+const DEBIAN_DISTRO_NAME = 'bookworm';
 const ALPINE_DISTRO_NAME = 'alpine';
+const DEBIAN_MIN_NODE_VERSION = 16;
 
 const SPRYKER_NODE_IMAGE_DISTRO_ENV_NAME = 'SPRYKER_NODE_IMAGE_DISTRO';
 const SPRYKER_NODE_IMAGE_VERSION_ENV_NAME = 'SPRYKER_NODE_IMAGE_VERSION';
@@ -188,8 +204,10 @@ foreach ($projectData['groups'] ?? [] as $groupName => $groupData) {
             $application = $applicationData['application'];
             $store = $endpointData['store'] ?? null;
             $region = $endpointData['region'] ?? null;
+            $codeBucket = $endpointData['code-bucket'] ?? null;
             $projectData['groups'][$groupName]['applications'][$applicationName]['endpoints'][$endpoint]['identifier'] = $store ? $store : $region;
             $projectData['groups'][$groupName]['applications'][$applicationName]['endpoints'][$endpoint]['primal'] = false;
+            $projectData['groups'][$groupName]['applications'][$applicationName]['endpoints'][$endpoint]['code-bucket'] = $codeBucket;
             while (!empty($projectData['_ports'][$debugPortIndex])) {
                 $debugPortIndex++;
             }
@@ -260,10 +278,13 @@ foreach ($primal as $callbacks) {
 
 $endpointMap = $projectData['_endpointMap'] = mapBackendEndpointsWithFallbackZed($projectData['_endpointMap']);
 
+$projectData = buildSwaggerEnvVariables($projectData);
+
 $projectData['_testing'] = [
     'defaultPort' => $defaultPort,
     'projectServices' => $projectData['services'],
     'endpointMap' => $endpointMap,
+    'storesForTesting' => [],
 ];
 
 $projectData['_applications'] = [];
@@ -387,11 +408,34 @@ foreach ($projectData['groups'] ?? [] as $groupName => $groupData) {
 
             $projectData['_testing']['dynamicStoreMode'] = $projectData['dynamicStoreMode'] ?? false;
 
-            if ($isEndpointDataHasStore && $endpointData['store'] === ($projectData['docker']['testing']['store'] ?? '')) {
-                $projectData['_testing']['storeName'] = $endpointData['store'];
-                $projectData['_testing']['identifier'] = $endpointData['identifier'];
-                $projectData['_testing']['regionServices'] = array_merge($projectData['_testing']['services'] ?? [], $services);
-                $projectData['_testing']['services'][$endpointData['store']][$applicationData['application']] = $services;
+            $testingStore = $projectData['docker']['testing']['store'] ?? '';
+            $testingStores = $projectData['docker']['testing']['stores'] ?? '';
+            $allowedStores = !empty($testingStores) ? array_map('trim', explode(',', $testingStores)) : [];
+
+            $shouldCollectStore = false;
+            if ($isEndpointDataHasStore) {
+                if (!empty($testingStore) && $endpointData['store'] === $testingStore) {
+                    $projectData['_testing']['storeName'] = $endpointData['store'];
+                    $projectData['_testing']['identifier'] = $endpointData['identifier'];
+                    $projectData['_testing']['regionServices'] = array_merge($projectData['_testing']['services'] ?? [], $services);
+                    $shouldCollectStore = true;
+                } elseif (!empty($allowedStores) && in_array($endpointData['store'], $allowedStores, true)) {
+                    $shouldCollectStore = true;
+                }
+
+                if ($shouldCollectStore) {
+                    $projectData['_testing']['services'][$endpointData['store']][$applicationData['application']] = $services;
+                    if (!isset($projectData['_testing']['storesForTesting'][$endpointData['store']])) {
+                        $projectData['_testing']['storesForTesting'][$endpointData['store']] = [
+                            'identifier' => $endpointData['identifier'],
+                            'regionServices' => [],
+                        ];
+                    }
+                    $projectData['_testing']['storesForTesting'][$endpointData['store']]['regionServices'] = array_merge(
+                        $projectData['_testing']['storesForTesting'][$endpointData['store']]['regionServices'],
+                        $services
+                    );
+                }
             }
 
             if ($isEndpointDataHasRegion && $groupData['region'] === ($projectData['docker']['testing']['region'] ?? '')) {
@@ -461,7 +505,42 @@ if (!empty($projectData['services']['key_value_store']['replicas'])) {
     $projectData['services']['key_value_store']['sources'] = json_encode($sources, JSON_UNESCAPED_SLASHES);
 }
 
+$customVolumes = [];
 foreach ($projectData['services'] ?? [] as $serviceName => $serviceData) {
+    $engine = strtolower($serviceData['engine'] ?? 'custom');
+    $version = $serviceData['version'] ?? 'default';
+    
+    if (!empty($serviceData['volumes']) && is_array($serviceData['volumes'])) {
+        foreach ($serviceData['volumes'] as $volume) {
+            if (preg_match('/^([^:]+):/', $volume, $matches)) {
+                $volumeName = trim($matches[1]);
+                if (!preg_match('/^\.\/|^\//', $volumeName)) {
+                    $customVolumes[$volumeName] = true;
+                }
+            }
+        }
+    }
+    
+    if (empty($serviceData['engine']) || $engine === 'custom') {
+        $projectData['services'][$serviceName]['_isCustom'] = true;
+        $projectData['services'][$serviceName]['_customEngine'] = 'custom';
+    } else {
+        $serviceTemplatePath = APPLICATION_SOURCE_DIR . DS . 'templates' . DS . 'service' . DS . $engine . DS . $version . DS . $engine . '.yml.twig';
+        if (!file_exists($serviceTemplatePath)) {
+            $projectData['services'][$serviceName]['_isCustom'] = true;
+            $projectData['services'][$serviceName]['_customEngine'] = 'custom';
+        }
+    }
+    
+    if (!empty($serviceData['build']) && !empty($projectData['services'][$serviceName]['_isCustom'])) {
+        $context = $serviceData['build']['context'] ?? $serviceName;
+        if (!preg_match('/[\/\\\\]/', $context) && !preg_match('/^\${/', $context)) {
+            $projectData['services'][$serviceName]['build']['context'] = './${DEPLOYMENT_PATH}/context/' . $context . '/';
+        } elseif (preg_match('/^context\//', $context)) {
+            $projectData['services'][$serviceName]['build']['context'] = './${DEPLOYMENT_PATH}/' . $context;
+        }
+    }
+    
     $httpEndpoints = array_filter(
         $serviceData['endpoints'] ?? [],
         static function ($endpointData) {
@@ -470,6 +549,7 @@ foreach ($projectData['services'] ?? [] as $serviceName => $serviceData) {
     );
 
     if (!empty($httpEndpoints)) {
+        $projectData['services'][$serviceName]['_hasHttpEndpoints'] = true;
         $environment['services'][] = [
             'name' => $serviceName,
             'endpoints' => array_map(
@@ -481,6 +561,7 @@ foreach ($projectData['services'] ?? [] as $serviceName => $serviceData) {
         ];
     }
 }
+$projectData['_customVolumes'] = array_keys($customVolumes);
 
 file_put_contents(
     $deploymentDir . DS . 'context' . DS . 'nginx' . DS . 'conf.d' . DS . 'frontend.default.conf.tmpl',
@@ -549,10 +630,37 @@ file_put_contents(
 );
 
 $envVarEncoder->setIsActive(true);
-file_put_contents(
-    $deploymentDir . DS . 'env' . DS . 'cli' . DS . 'testing.env',
-    $twig->render('env/cli/testing.env.twig', $projectData['_testing'])
-);
+
+$testingStores = $projectData['docker']['testing']['stores'] ?? '';
+$storesForTesting = $projectData['_testing']['storesForTesting'] ?? [];
+
+if (!empty($testingStores) && !empty($storesForTesting)) {
+    foreach ($storesForTesting as $store => $storeData) {
+        $servicesStructure = [];
+        if (isset($projectData['_testing']['services'][$store])) {
+            foreach ($projectData['_testing']['services'][$store] as $appName => $appServices) {
+                $servicesStructure[$storeData['identifier']][$appName] = $appServices;
+            }
+        }
+
+        $storeTestingData = array_merge($projectData['_testing'], [
+            'storeName' => $store,
+            'identifier' => $storeData['identifier'],
+            'regionServices' => $storeData['regionServices'],
+            'services' => $servicesStructure,
+        ]);
+
+        file_put_contents(
+            $deploymentDir . DS . 'env' . DS . 'cli' . DS . strtolower($store) . '.testing.env',
+            $twig->render('env/cli/testing.env.twig', $storeTestingData)
+        );
+    }
+} else {
+    file_put_contents(
+        $deploymentDir . DS . 'env' . DS . 'cli' . DS . 'testing.env',
+        $twig->render('env/cli/testing.env.twig', $projectData['_testing'])
+    );
+}
 
 verbose('Generating scripts... [DONE]');
 
@@ -581,6 +689,8 @@ exec(sprintf(
     implode(' ', $hosts)
 ), $output, $returnCode);
 
+
+
 if ($returnCode > 0) {
     exit($returnCode);
 }
@@ -598,6 +708,7 @@ if (count($errorMessages) > 0) {
 
     exit(1);
 }
+
 
 // -------------------------
 /**
@@ -1046,16 +1157,17 @@ function warn($output)
 }
 
 /**
- * @param array $services
- * @param string $engine
+ * Retrieve the names of services that use one of the given storage engines.
  *
- * @return string[]
+ * @param array<string, array{engine: string}> $services
+ * @param list<string>                        $engines  Allowed engine names
+ * @return list<string>                                 Service names matching any engine
  */
-function retrieveStorageServices(array $services, string $engine = 'redis'): array
+function retrieveStorageServices(array $services, array $engines = ['redis', 'valkey']): array
 {
     $storageServices = [];
     foreach ($services as $serviceName => $serviceData) {
-        if ($serviceData['engine'] === $engine) {
+        if (in_array($serviceData['engine'], $engines)) {
             $storageServices[] = $serviceName;
         }
     }
@@ -1129,6 +1241,20 @@ function isAutoloadCacheEnabled(array $projectData): bool
     }
 
     return $projectData['docker']['cache']['autoload']['enabled'] ?? false;
+}
+
+/**
+ * @param array $projectData
+ *
+ * @return bool
+ */
+function isAcpLocalDevelopmentEnabled(array $projectData): bool
+{
+    if (empty($projectData['image']['environment']['ACP_DOCKER_SDK_FILE'])) {
+        return false;
+    }
+
+    return true;
 }
 
 /**
@@ -1296,6 +1422,9 @@ function buildSecrets(string $deploymentDir): array
     $data['SPRYKER_URI_SIGNER_SECRET_KEY'] = generateToken(80);
     $data['SPRYKER_PRODUCT_CONFIGURATOR_ENCRYPTION_KEY'] = generateToken(10);
     $data['SPRYKER_PRODUCT_CONFIGURATOR_HEX_INITIALIZATION_VECTOR'] = generateRandomHex(16);
+    $data['SPRYKER_CUSTOMER_REMEMBER_ME_SECRET'] = generateToken(10);
+    $data['SPRYKER_CONFIGURATION_ENCRYPTION_KEY'] = generateRandomHex(32);
+    $data['SPRYKER_CONFIGURATION_ENCRYPTION_INIT_VECTOR'] = generateRandomHex(16);
 
     return $data;
 }
@@ -1682,14 +1811,17 @@ function buildNodeJsNpmBuildConfig(array $projectData): array
 
     $nodejsConfig = $projectData['image']['node'] ?? [];
 
+    $distroName = getNodeDistroName($nodejsConfig, $imageName);
+    $nodeVersion = array_key_exists('version', $nodejsConfig)
+        ? (string)$nodejsConfig['version']
+        : (string)DEFAULT_NODE_VERSION;
+
     return [
-        SPRYKER_NODE_IMAGE_DISTRO_ENV_NAME => getNodeDistroName($nodejsConfig, $imageName),
-        SPRYKER_NODE_IMAGE_VERSION_ENV_NAME => array_key_exists('version', $nodejsConfig)
-            ? (int)$nodejsConfig['version']
-            : DEFAULT_NODE_VERSION,
+        SPRYKER_NODE_IMAGE_DISTRO_ENV_NAME => $distroName,
+        SPRYKER_NODE_IMAGE_VERSION_ENV_NAME => getNodeImageVersion($distroName, $nodeVersion),
         SPRYKER_NPM_VERSION_ENV_NAME => array_key_exists('npm', $nodejsConfig)
-            ? (int)$nodejsConfig['npm']
-            : DEFAULT_NPM_VERSION,
+            ? (string)$nodejsConfig['npm']
+            : (string)DEFAULT_NPM_VERSION,
     ];
 }
 
@@ -1724,6 +1856,32 @@ function getNodeDistroName(array $nodejsConfig, string $imageName): string
     return ALPINE_DISTRO_NAME;
 }
 
+/**
+ * @param string $distroName
+ * @param string $nodeVersion
+ *
+ * @return string
+ */
+function getNodeImageVersion(string $distroName, string $nodeVersion): string
+{
+    if ($distroName !== DEBIAN_DISTRO_NAME) {
+        return $nodeVersion;
+    }
+
+    if ((int)$nodeVersion >= DEBIAN_MIN_NODE_VERSION) {
+        return $nodeVersion;
+    }
+
+    verbose(sprintf(
+        'Node %s is not published for Debian "%s". Using Node %s instead.',
+        $nodeVersion,
+        DEBIAN_DISTRO_NAME,
+        DEBIAN_MIN_NODE_VERSION,
+    ));
+
+    return (string)DEBIAN_MIN_NODE_VERSION;
+}
+
 function buildProjectData(array $projectData): array
 {
     $factory = new ProjectDataFactory();
@@ -1731,4 +1889,78 @@ function buildProjectData(array $projectData): array
     return $factory
         ->createProjectDataBuildProcessor()
         ->run($projectData);
+}
+
+function buildSwaggerEnvVariables(array $projectData): array
+{
+    $services = $projectData['services'] ?? [];
+    $swaggerService = $services['swagger'] ?? [];
+
+    if (empty($swaggerService)) {
+        return $projectData;
+    }
+
+    $swaggerUrls = buildSwaggerUrls($projectData);
+
+    if (empty($swaggerUrls)) {
+        return $projectData;
+    }
+
+    $swaggerService['environment']['URLS'] = json_encode($swaggerUrls);
+    $projectData['services']['swagger'] = $swaggerService;
+
+    return $projectData;
+}
+
+function isGlueApplication(string $appName): bool
+{
+    $glueApps = [
+        GLUE_APP,
+        GLUE_STOREFRONT,
+        GLUE_BACKEND,
+    ];
+
+    return in_array($appName, $glueApps);
+}
+
+function buildGlueSwaggerUrl(string $appName, string $appHost, string $schema): array
+{
+    $appSuffix = 'Api';
+
+    $appName = explode('-', $appName);
+    $appName[] = $appSuffix;
+
+    $appName = array_map('ucfirst', $appName);
+    $appName = implode(' ', $appName);
+
+    $schemaUrl = sprintf('%s://%s/%s', $schema, $appHost, 'schema.yml');
+
+    return [
+        'name' => $appName,
+        'url' => $schemaUrl,
+    ];
+}
+
+function buildSwaggerUrls(array $projectData): array
+{
+    $schema = getCurrentScheme($projectData);
+    $endpoints = $projectData['_endpointMap'] ?? [];
+
+    if (empty($endpoints)) {
+        return [];
+    }
+
+    $urlsEnvVariable = [];
+
+    $endpoints = $endpoints[array_key_first($endpoints)] ?? [];
+
+    foreach ($endpoints as $applicationName => $applicationHost) {
+        if (!isGlueApplication($applicationName)) {
+            continue;
+        }
+
+        $urlsEnvVariable[] = buildGlueSwaggerUrl($applicationName, $applicationHost, $schema);
+    }
+
+    return $urlsEnvVariable;
 }

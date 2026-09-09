@@ -233,13 +233,13 @@ Defines the Docker image configuraion to run Spryker applications in.
 Defines the image tag according to the `spryker/php` images located at [Docker Hub](https://hub.docker.com/r/spryker/php/tags).
 
 
-This variable is optional. If not specified, the default value applies: `image: spryker/php:7.3`.
+This variable is optional. If not specified, the default value applies: `image: spryker/php:8.3`.
 
 ```yaml
 version: 1.0
 
 image:
-    tag: spryker/php:7.3
+    tag: spryker/php:8.3
 ```
 
 
@@ -288,6 +288,9 @@ Defines PHP settings for Spryker applications.
   * `pcov`
   * `tideways`
   * `xhprof`
+  * `otel`
+  * `excimer`
+  * `imagick`
 
 ```yaml
 image:
@@ -300,6 +303,9 @@ image:
             - newrelic
             - tideways
             - xhprof
+            - otel
+            - excimer
+            - imagick
 ```
 ***
 
@@ -499,7 +505,49 @@ Optional parameters for `application:`:
         ...
 ```
 
+* `groups: applications: application: http: buffer` - defines how the server handles buffering of responses from FastCGI processes. The following parameters are configurable: `fastcgi_buffer_size`, `fastcgi_buffers` and `fastcgi_busy_buffers_size`. If these values are not explicitly defined, Nginx uses its default settings.
+
+```yaml
+...
+yves_eu:
+    application: yves
+    endpoints:
+        yves.eu.spryker.local:
+            region: EU
+            http:
+                buffer:
+                    buffer_size: 8k
+                    buffers: 128 128k
+                    busy_buffers_size: 256k
+...
+```
+
+* `groups: applications: application: endpoints: redirects:` - defines http redirects for the specific configuration.
+* `groups: applications: application: endpoints: redirects: redirect: code` - defines an HTTP code for a redirect. Allowed values are `301` and `302`. The default values is `302`.
+* `groups: applications: application: endpoints: redirects: redirect: url` - defines a URL to redirect to.
+* `groups: applications: application: endpoints: redirects: redirect: request-uri` - preserves or ignores request-uri due to redirect. Allowed values are `true` or `false`. The default value is `false`.
+* `groups: applications: application: endpoints: redirects: redirect: preserve-host` - preserves or ignores schema and host due to redirect. Allowed values are `true` or `false`. The default value is `false`.
+
+```yaml
+...
+yves_eu:
+    application: yves
+    endpoints:
+        yves.eu.spryker.local:
+            region: EU
+            redirects:
+                ~* /product-comparison:
+                    url: "/login"
+                    code: 302
+                    preserve-host: true
+                ~* /computer:
+                    url: "https://www.google.com/"
+                    code: 301
+...
+```
+
 * `groups: applications: application: limits: workers` - defines the maximum number of concurrent child processes a process manager can serve simultaneously.
+> Note: This option isn’t available in Spryker Cloud because we automatically detect and apply the optimal PHP-FPM configuration for each application.
 
 ```yaml
 ...
@@ -508,7 +556,7 @@ Optional parameters for `application:`:
         application: backoffice
         limits:
             workers: 4
-        ...
+...
 ```
 
 :::(Info) ()
@@ -553,7 +601,7 @@ This variable is optional. If not specified, the [default version](https://githu
 services:
     database:
         engine: postgres
-        version: 9.6
+        version: 17
         root:
             username: "root"
             password: "secret"
@@ -580,11 +628,12 @@ services:
   scheduler:
     engine: jenkins
     version: 2.176
+    number-of-executors: 4
     endpoints:
       scheduler.spryker.local:
 
   mail_catcher:
-    engine: mailhog
+    engine: mailpit
     endpoints:
       mail.spryker.local:
  ```
@@ -610,6 +659,7 @@ Defines the list of *Endpoints* to access the *Application*.
 
 The format of the key  is `domain[:port]`. The key must be project-wide unique.
 * `groups: applications: endpoints: store:` defines the *Store* as context to process requests within.
+* `groups: applications: endpoints: code-bucket:` defines the *CodeBucket* as context to process requests within.
 * `groups: applications: endpoints: services:` defines the *Store*-specific settings for services. Only `session:` is currently allowed here. See [Services](#services) to learn more.
 * `groups: applications: endpoints: cors-allow-origin:` defines a [CORS header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin). It is allowed for `glue` application only. Possible values are:
   * Single domain as a string
@@ -708,6 +758,7 @@ docker:
 
  ```
 * `docker: debug: xdebug: enabled:` - defines if Xdebug is enabled.
+* `docker: debug: xdebug: custom_host_ip:` - defines the custom host IP. It can be set as `host.docker.internal` when working in Windows environment with WSL2.
 
 
 ### docker: maintenance:
@@ -787,6 +838,67 @@ docker:
 Now you can access the applications from the `{ IP address 1 }` and `{ IP address 2 }` IP addresses.
 
 
+### Per-store and per-region maintenance pages
+
+By default, all endpoints of an application share the same maintenance page located at `public/{application}/maintenance/index.html` (e.g., `public/Yves/maintenance/index.html`).
+
+You can customize the maintenance page per store or per region by placing an `index.html` file in a subdirectory named after the store or region code:
+
+```
+public/Yves/maintenance/
+├── index.html          # Default maintenance page (fallback)
+├── EU/
+│   └── index.html      # Maintenance page for EU region
+├── US/
+│   └── index.html      # Maintenance page for US region
+├── DE/
+│   └── index.html      # Maintenance page for DE store (legacy store mode)
+└── AT/
+    └── index.html      # Maintenance page for AT store (legacy store mode)
+```
+
+The same structure applies to all applications (`Backoffice`, `MerchantPortal`, `Zed`, etc.).
+
+Nginx resolves the maintenance page using the following fallback order:
+
+**Dynamic store mode** (region-based endpoints):
+1. `maintenance/{region}/index.html` — region-specific page
+2. `maintenance/index.html` — default page
+
+**Legacy store mode** (store-based endpoints):
+1. `maintenance/{store}/index.html` — store-specific page
+2. `maintenance/{region}/index.html` — region-specific page
+3. `maintenance/index.html` — default page
+
+If no store-specific or region-specific page exists, the default `maintenance/index.html` is served. The default maintenance page is required and must always be present.
+
+#### Testing maintenance pages locally
+
+To verify a maintenance page locally without changing the deploy file, follow these steps:
+
+1. Boot the environment with your deploy file:
+```bash
+docker/sdk boot {deploy file name}
+```
+
+2. Open the generated `docker/deployment/default/docker-compose.yml` and add the `SPRYKER_MAINTENANCE_MODE_ENABLED` environment variable to the `frontend` service:
+```yaml
+services:
+  frontend:
+    image: ...
+    environment:
+      SPRYKER_MAINTENANCE_MODE_ENABLED: 1
+```
+
+3. Start the environment:
+```bash
+docker/sdk up
+```
+
+4. Open Yves in a browser — the maintenance page should be displayed.
+
+> **Note:** `docker/deployment/default/docker-compose.yml` is a generated file and will be overwritten the next time `docker/sdk boot` is run. This approach is intended for temporary local testing only. Do not commit this change.
+
 
 ### docker: logs:
 * `docker: logs: path:` defines the path to the directory with Docker logs. This variable is optional. If not specified, the default value applies: `path: '/var/log/spryker`.
@@ -798,6 +910,15 @@ Now you can access the applications from the `{ IP address 1 }` and `{ IP addres
 Defines the configuration for testing.
 
 * `docker: testing: store:` defines a *Store* as the context for running tests using specific console commands, like `docker/sdk console code:test`. This variable is optional. If not specified, the default value applies: `store: DE`.
+
+* `docker: testing: stores:` defines a comma-separated list of *Stores* for running tests across multiple stores. When specified, you can select which store to use for testing by setting the `APPLICATION_STORE` environment variable. This variable is optional. If both `store:` and `stores:` are specified, `store:` takes precedence for backward compatibility.
+
+Example:
+```yaml
+docker:
+    testing:
+        stores: DE,AT
+```
 
 :::
 ***
@@ -832,6 +953,25 @@ docker:
  ```
  ***
 
+### docker: compose:
+
+#### docker: compose: yamls:
+
+Defines additional Docker Compose YAML files.
+
+If you define `docker: compose: yamls:`, the listed files are passed to `docker compose` as extra arguments in the order specified. This lets you plug in project-specific or CI-specific services (for example, Robot tests) without changing the generated file.
+
+**Example**
+
+```yaml
+version: 1.0
+
+docker:
+    compose:
+        yamls:
+            - .robot/docker-compose.robot.yml
+```
+
 ### composer:
 
 Defines the composer settings to be used during deployment.
@@ -842,6 +982,9 @@ Defines the composer settings to be used during deployment.
 2. `autoload:` - defines composer autoload options. Possible values are `--optimize` and `--classmap-authoritative`. This variable is optional. If not specified, the default values apply:
 	* Development mode: `autoload: --optimize`
 	* Demo mode: `autoload: --classmap-authoritative`
+3. `verbose:` - defines composer verbose mode. The default values is `-vvv`. Possible values are:
+    * `-q` (Do not output any message).
+    * `-v`, `-vv` and `-vvv`
 ***
 
 ## Services
@@ -948,7 +1091,7 @@ A key-value store *Service* for storing business data.
 
 * Project-wide
 
-  * `key_value_store: engine:` - possible value is: `redis`.
+  * `key_value_store: engine:` - possible value are: `redis` and `valkey`.
   * `key_value_store: replicas: number:` - defines the number of replicas. The default value is `0`.
   * `session: endpoints:` - defines the service's port that can be accessed via given endpoints.
 
@@ -976,7 +1119,7 @@ A mail catcher *Service* used to catch all outgoing emails for development or te
 
 * Project-wide
 
-     - `mail_catcher: engine:` - possible value is `mailhog`.
+     - `mail_catcher: engine:` - possible values are `mailpit` or `mailhog`.
      - `mail_catcher: endpoints:`- defines the service's port and web interface that can be accessed via given endpoints.
 
 
@@ -1003,6 +1146,7 @@ A scheduler *Service* used to run application-specific jobs periodically in the 
 
 * Project-wide
   * `scheduler: engine:` - possible value is `jenkins`.
+  * `scheduler: number-of-executors:` - defines the number of executors for the Jenkins instance. The minimum supported Jenkins version is 2.516.3. This property is relevant only for local development and does not affect the Cloud setup.
   * `scheduler: endpoints:` - defines the service's port and web interface that can be accessed via given endpoints.
 
 
@@ -1022,7 +1166,7 @@ A key-value store *Service* for storing session data.
 
 * Project-wide
 
-  - `session: engine:` - possible values is `redis`.
+  - `session: engine:` - possible values are: `redis` and `valkey`.
   - `session: endpoints:` - defines the service's port that can be accessed via given endpoints.
 
 * Endpoint-specific

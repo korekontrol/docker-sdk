@@ -63,13 +63,17 @@ $ docker compose version
 ```
 :::
 
-8. In `{shop_name}/docker/context/php/debug/etc/php/debug.conf.d/69-xdebug.ini`, set `xdebug.remote_host` and `xdebug.client_host` to `host.docker.internal`:
+8. In `deploy.dev.yml`, set the debug configuration as follows:
 
-```text
-...
-xdebug.remote_host=host.docker.internal
-...
-xdebug.client_host=host.docker.internal
+```yaml
+docker:
+  ...
+  debug:
+    enabled: true
+    xdebug:
+      enabled: true
+      custom_host_ip: host.docker.internal
+  ...
 ```
 
 9. Add your user to the `docker` group:
@@ -130,5 +134,5 @@ To get the full and up-to-date list of commands, run `docker/sdk help`.
 * [Configuring debugging](../../02-development/05-configuring-debugging.md)
 * [Deploy file reference - 1.0](../../07-deploy-file/02-deploy.file.reference.v1.md)
 * [Configuring services](../../06-configuring-services.md)
-* [Setting up a self-signed SSL certificate](https://documentation.spryker.com/docs/setting-up-a-self-signed-ssl-certificate)
+* [Setting up a self-signed SSL certificate](https://docs.spryker.com/docs/dg/dev/set-up-spryker-locally/configure-after-installing/set-up-a-self-signed-ssl-certificate.html)
 * [Additional DevOPS guidelines](https://documentation.spryker.com/docs/additional-devops-guidelines)
